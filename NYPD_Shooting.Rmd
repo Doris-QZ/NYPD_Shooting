@@ -1,0 +1,283 @@
+# Shooting Incidents Occurred in NYC from 2006 to 2022   
+  
+**Doris Chen**  
+  
+**2023-07-25**  
+
+***
+
+## Introduction
+
+Shooting incidents have caused harm to many American families and attracted widespread attention in society. We looked into the data from NYPD, trying to discover patterns in the occurrence time, locations and victims of the incidents.  
+  
+The data lists a breakdown of every shooting incident that occurred in New York City going back to 2006 through the end of 2022. More details please check the [Data Source](https://catalog.data.gov/dataset/nypd-shooting-incident-data-historic).  
+  
+  
+## Load packages  
+  
+```{r message = FALSE }
+library(tidyverse)
+library(lubridate)
+library(lessR)
+library(caret)
+```
+  
+## Import Data  
+  
+```{r import data}
+url <- "https://data.cityofnewyork.us/api/views/833y-fsy8/rows.csv?accessType=DOWNLOAD"
+NYPD_shooting <- read_csv(url, show_col_types = FALSE)
+```
+
+We take a Look at the data to get some general ideas.  
+  
+
+```{r results='hide'}
+str(NYPD_shooting)
+```
+The result is very long, so I set `results='hide'` to avoid a long list in the report.
+  
+There are 27,312 observations of 21 variables. Quite a few of them are about locations or coordinates of the incidents which we're not going to analysis this time. Also there are many NA's in some variables, and the data types need to be modified.
+  
+    
+## Data Cleaning and Transforming
+
+We select variables which we are interested in and clean the data.
+
+```{r}
+NYPD_S <-NYPD_shooting %>% 
+        select(INCIDENT_KEY, OCCUR_DATE, OCCUR_TIME, BORO, PRECINCT, STATISTICAL_MURDER_FLAG, 
+               PERP_AGE_GROUP, PERP_SEX, PERP_RACE, VIC_AGE_GROUP, VIC_SEX, VIC_RACE) %>% 
+        mutate(INCIDENT_KEY = as.factor(INCIDENT_KEY), OCCUR_DATE = mdy(OCCUR_DATE), 
+               BORO = as.factor(BORO), PRECINCT = as.factor(PRECINCT), 
+               STATISTICAL_MURDER_FLAG = as.factor(STATISTICAL_MURDER_FLAG), 
+               PERP_AGE_GROUP = as.factor(PERP_AGE_GROUP), PERP_SEX = as.factor(PERP_SEX), 
+               PERP_RACE = as.factor(PERP_RACE), VIC_AGE_GROUP = as.factor(VIC_AGE_GROUP), 
+               VIC_SEX = as.factor(VIC_SEX), VIC_RACE = as.factor(VIC_RACE))
+
+summary(NYPD_S)
+```
+  
+    
+As we can see from the summary, the data of victim is quite complete, while more than 50% of 'unknown' or NA's regarding perpetrator. So we'll put away perpetrator's information for now, only focusing on time, location and victims this time.  
+  
+
+```{r}
+NYPD_S <-NYPD_S %>% 
+        select(-c(PERP_AGE_GROUP, PERP_SEX, PERP_RACE)) %>% 
+        mutate(YEAR = year(OCCUR_DATE), MONTH = month(OCCUR_DATE), HOUR = hour(OCCUR_TIME))
+```
+  
+    
+According to the Data Footnotes, 'Each INCIDENT_KEY represents a victim but similar duplicate keys are counted as one incident.' So we decided to create a new table to analysis the pattern of incidents.  
+    
+      
+```{r}
+incidents <- NYPD_S %>%
+        distinct(INCIDENT_KEY, .keep_all = TRUE) %>% 
+        select(INCIDENT_KEY, YEAR, MONTH, HOUR, BORO)
+```
+   
+Now we check if there is NA in any column of the two tables.   
+  
+```{r}
+colSums(is.na(NYPD_S))
+colSums(is.na(incidents))
+```
+   
+There are no NA's in the two tables.         
+      
+## Data Visualization
+
+We'll visualize the data to answer some questions.
+
+**Question 1: what is the trend of shooting incidents happened in New York from 2006 to 2022?**
+
+```{r warning=FALSE}
+incidents %>% 
+        ggplot(aes(x = factor(YEAR))) +
+        geom_bar(fill = 'brown') +
+        labs(title = "Shooting Incidents in New York", subtitle = "From 2006 to 2022", 
+             x = "Year", y = "Incidents") +
+        geom_text(stat = 'count', aes(label = ..count..), vjust = 1.5, col = 'white', size = 3) +
+        theme_classic()
+```
+
+As the plot demonstrated, the number of incidents was declining from 2006 to 2019, especially during 2014 to 2019, but shooting up again by nearly 50% during pandemic, reaching to a high point(1562) in 2021. 
+
+So it raised another question:
+
+**Question 2: which borough did the shooting incidents happen the most?**
+
+  
+```{r}
+summary(incidents$BORO)
+```
+    
+  
+The shooting happened the most in Brooklyn, 8806 incidents in total over the last 17 years.  
+
+Here is the trend of shooting incidents happened in different boroughs from 2006 to 2022.   
+  
+```{r}
+incidents %>% 
+        ggplot(aes(x = factor(YEAR))) +
+        facet_wrap(~ BORO) +
+        geom_bar(aes(fill = BORO)) +
+        labs(title = "Shooting Incidents in Boroughs of New York", subtitle = "From 2006 to 2022", 
+             x = "Year", y = "Incidents") +
+        geom_text(stat = 'count', aes(label = ..count..), vjust = -0.5, size = 2.5) +
+        theme_classic()+
+        theme(axis.text.x = element_text(angle = 90), legend.position = "bottom", 
+              legend.title = element_blank())
+```
+  
+Now we'll discover if there is a pattern of time when the incidents happened.  
+  
+**Question 3: What hours did the incidents happen the most during a day?**  
+  
+```{r}
+incidents %>% 
+        ggplot(aes(x = factor(HOUR))) +
+        geom_bar(fill = 'lightgrey') +
+        labs(title = "Shooting Incidents Occurence Time", x = "Hour", y = "Incidents") +
+        geom_text(stat = 'count', aes(label = ..count..), vjust = -0.5, size = 3) +
+        theme_classic()
+```
+  
+The plot shows a clear pattern that the incidents happened the most at late night and early morning, especially during 10pm to 2am.    
+  
+**Question 4: What months did the incidents happen the most during a year?**  
+  
+```{r}
+incidents %>% 
+        ggplot(aes(x = factor(MONTH))) +
+        geom_bar(fill = 'lightgrey') +
+        labs(title = "Shooting Incidents Occuring Months", x = "Month", y = "Incidents") +
+        geom_text(stat = 'count', aes(label = ..count..), vjust = -0.5, size = 3) +
+        theme_classic()
+```
+  
+The incidents happened more during summer. Given that more incidents happened at night, especially 10pm to 2am, probably because more people hanging out at summer nights.
+
+Now we'll check about the information of victims.  
+
+**Question 5: What are the genders, age groups and races of the victims?**    
+
+  
+```{r}
+table(NYPD_S$VIC_SEX)
+```
+
+Over 90% of the victims were male.
+
+```{r}
+table(NYPD_S$VIC_AGE_GROUP)
+```
+
+There are 61 "UNKNOWN" in victim age groups, since it's less than 0.2%, we decide to ignore it. Also, we will change the one with "1022" to "UNKNOWN".
+  
+```{r}
+NYPD_S$VIC_AGE_GROUP <- replace(NYPD_S$VIC_AGE_GROUP, NYPD_S$VIC_AGE_GROUP == 1022, 'UNKNOWN')
+
+Vic_Age <- NYPD_S %>% 
+        select(VIC_AGE_GROUP) %>% 
+        filter(VIC_AGE_GROUP != 'UNKNOWN')
+
+# The level of "1022" and "UNKNOWN" still exist, so we use "droplevels" here to remove the unused level. 
+Vic_Age$VIC_AGE_GROUP <- droplevels(Vic_Age$VIC_AGE_GROUP)
+```
+
+```{r}  
+## Using "lessR" package  
+
+PieChart(VIC_AGE_GROUP, hole = 0, values = "%", data = Vic_Age, 
+         main = "Age Groups of Victims", labels_cex = 0.8, quiet = TRUE)
+```  
+  
+  
+82% of victims were aging from 18 to 44, including 45% from 25 to 44, and 37% from 18 to 24.   
+
+```{r}
+Vic_Race <- NYPD_S %>% 
+        select(VIC_RACE) %>% 
+        filter(VIC_RACE != 'UNKNOWN')
+Vic_Race$VIC_RACE <- droplevels(Vic_Race$VIC_RACE)
+PieChart(VIC_RACE, hole = 0, values = "%", data = Vic_Race,  
+         main = "Races of Victims", labels_cex = 0.8, quiet = TRUE)
+```  
+  
+  
+71% of the victims were black, 25% were Hispanic(including 15% White Hispanic and 10% Black Hispanic).  
+  
+  
+## Data Model  
+  
+There is a variable shows if the incident was murder or not.   
+
+```{r}
+table(NYPD_S$STATISTICAL_MURDER_FLAG)
+```
+  
+19.28% of the incidents were murder. We'll try to create a model using the variables of time(hour), location(precinct) and victims(sex, age, race) to predict if it is a murder or not.
+      
+```{r}
+NYPD <- NYPD_S %>% 
+        select(-c(INCIDENT_KEY, OCCUR_DATE, OCCUR_TIME, BORO, YEAR, MONTH))
+```
+  
+**Data splitting**  
+  
+```{r}
+set.seed(1234)
+inTrain <- createDataPartition(y = NYPD$STATISTICAL_MURDER_FLAG, p = 0.80, list = FALSE)
+training <- NYPD[inTrain, ]
+testing <- NYPD[-inTrain, ]
+```
+  
+  
+**Fit a model**    
+  
+```{r warning=FALSE}
+mod <- train(STATISTICAL_MURDER_FLAG ~., data = training, method = 'glm', 
+             trControl = trainControl(method = "cv", number = 3), family = "binomial")
+```
+    
+      
+**Prediction and Testing**    
+  
+```{r warning=FALSE}
+pred <- predict(mod, newdata = testing)
+confusionMatrix(pred, testing$STATISTICAL_MURDER_FLAG)
+```
+  
+  
+The accuracy is 80.76%, but it actually only predicted 2 "True" murders while there were 1051. This suggests that there is no apparent pattern formed by the combination of time, location and victims in murder shooting incidents from the data.  
+     
+  
+## Conclusion  
+  
+After exploring the data, we have several findings as following:  
+
+1. **Overall Trend**: The number of incidents in New York City was declining from 2006 to 2019, but shooting up again by nearly 50% during pandemic, reaching to a high point(1562) in 2021;
+2. **Region and Time**: The shootings occurred most frequently in Brooklyn, primarily during late night and early morning hours, and were more common in the summer;
+3. **Victim**: 90% of victims were male; 82% of victims were aging from 18 to 44; 71% of the victims were black, 25% were Hispanic(including 15% White Hispanic and 10% Black Hispanic).      
+  
+Also, we tried to build a model using time, location and victims to predict the type of incidents, but it didn't work very well. This may suggest that there is no apparent pattern of time, precinct and victims in murder shooting incidents from the data.
+  
+  
+## Bias Identification  
+  
+Two aspects of bias may exist in the above analysis:  
+1. Data: Over 50% of missing data regarding perpetrators' information. It could be random, or could exist certain bias during data entry.  
+2. Personal: When talking about shooting or criminal incidents, I realized that I may have a little bias regarding of the perpetrators and victims, like people at some education levels or grew up from certain environment might be more likely to commit crime, or due to the social bias, individuals of some races may be more vulnerable to becoming victims.   
+
+Due to the missing data, I didn't look into the perpetrators' data this time but the victims. I aware of my bias, so I didn't put too much weight of analyzing the victims' races. Instead, I was trying to find a pattern of when the incidents happened and where it happened the most, also drawing a general picture of the genders, age groups and races of victims.
+   
+   
+## Appendix  
+  
+```{r}
+sessionInfo()
+```
+  
